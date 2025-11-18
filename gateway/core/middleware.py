@@ -4,6 +4,7 @@ from typing import Callable
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+import structlog
 
 from gateway.monitoring.logger import logger
 from gateway.monitoring.metrics import metrics
@@ -15,19 +16,36 @@ from shared.utils import get_client_ip
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """Adds unique request ID to each request."""
+    """Adds unique request ID to each request and binds it to logging context."""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """Add request ID to request state."""
+        """
+        Add request ID to request state and logging context.
+
+        This middleware:
+        1. Extracts or generates a unique request ID
+        2. Stores it in request.state for access by other components
+        3. Binds it to structlog context for automatic inclusion in all logs
+        4. Propagates it to response headers for client correlation
+        """
         import uuid
 
+        # Extract request ID from header or generate new one
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request.state.request_id = request_id
 
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
+        # Bind request ID to logging context for this request
+        # This ensures all logs during this request will include the request_id
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(request_id=request_id)
 
-        return response
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            # Clear context after request completes
+            structlog.contextvars.clear_contextvars()
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):

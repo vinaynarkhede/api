@@ -1,6 +1,26 @@
 version: '3.8'
 
 services:
+  # PostgreSQL for data persistence
+  postgres:
+    image: postgres:15-alpine
+    container_name: api-gateway-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=gateway_user
+      - POSTGRES_PASSWORD=gateway_password
+      - POSTGRES_DB=api_gateway
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway_user"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - api-network
+
   # Redis for caching and rate limiting
   redis:
     image: redis:7-alpine
@@ -28,16 +48,32 @@ services:
     environment:
       - DEBUG=true
       - ENVIRONMENT=development
+      # Database configuration
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=api_gateway
+      - DB_USER=gateway_user
+      - DB_PASSWORD=gateway_password
+      - DB_POOL_SIZE=20
+      - DB_MAX_OVERFLOW=40
+      # Redis configuration
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # Security
       - SECRET_KEY=your-secret-key-change-in-production
       - LOG_LEVEL=INFO
+      # Feature flags
       - RATE_LIMIT_ENABLED=true
       - CACHE_ENABLED=true
       - CIRCUIT_BREAKER_ENABLED=true
       - METRICS_ENABLED=true
       - TRACING_ENABLED=true
+      # Optional services (set to false if not using)
+      - VAULT_ENABLED=false
+      - CONSUL_ENABLED=false
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       user-service:
@@ -137,11 +173,47 @@ services:
       - api-network
     restart: unless-stopped
 
+  # HashiCorp Vault (Optional - for secrets management)
+  # Uncomment and update gateway VAULT_ENABLED=true to use
+  # vault:
+  #   image: vault:1.15
+  #   container_name: api-gateway-vault
+  #   ports:
+  #     - "8200:8200"
+  #   environment:
+  #     - VAULT_DEV_ROOT_TOKEN_ID=dev-root-token
+  #     - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+  #   cap_add:
+  #     - IPC_LOCK
+  #   volumes:
+  #     - vault_data:/vault/file
+  #   networks:
+  #     - api-network
+  #   restart: unless-stopped
+
+  # HashiCorp Consul (Optional - for service discovery)
+  # Uncomment and update gateway CONSUL_ENABLED=true to use
+  # consul:
+  #   image: consul:1.17
+  #   container_name: api-gateway-consul
+  #   ports:
+  #     - "8500:8500"
+  #     - "8600:8600/udp"
+  #   command: agent -dev -ui -client=0.0.0.0
+  #   volumes:
+  #     - consul_data:/consul/data
+  #   networks:
+  #     - api-network
+  #   restart: unless-stopped
+
 networks:
   api-network:
     driver: bridge
 
 volumes:
+  postgres_data:
   redis_data:
   prometheus_data:
   grafana_data:
+  # vault_data:  # Uncomment if using Vault
+  # consul_data:  # Uncomment if using Consul

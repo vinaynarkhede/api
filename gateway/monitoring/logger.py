@@ -21,6 +21,7 @@ def configure_logging():
     # Configure structlog
     structlog.configure(
         processors=[
+            structlog.contextvars.merge_contextvars,  # Merge context variables (request_id, etc.)
             structlog.stdlib.filter_by_level,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,

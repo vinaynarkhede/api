@@ -24,6 +24,9 @@ from gateway.cache.redis_cache import redis_cache
 from gateway.resilience.circuit_breaker import circuit_breaker_registry
 from gateway.monitoring.logger import logger
 from gateway.monitoring.metrics import metrics
+from gateway.database.connection import db_manager
+from gateway.health.checks import HealthChecker
+from gateway.admin.api import router as admin_router
 from shared.models import HealthCheck, Token, TokenData
 from shared.exceptions import RouteNotFound, AuthenticationError, RateLimitExceeded
 from shared.utils import get_client_ip
@@ -34,6 +37,14 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("gateway_starting", version=settings.app_version)
 
+    # Initialize database
+    try:
+        db_manager.initialize()
+        logger.info("database_initialized", pool_size=settings.db_pool_size)
+    except Exception as e:
+        logger.error("database_initialization_failed", error=str(e))
+        # Continue without database for now (could be made fatal)
+
     # Startup logic here
     yield
 
@@ -43,6 +54,13 @@ async def lifespan(app: FastAPI):
     await redis_cache.close()
     await rate_limiter.close()
     await api_key_handler.close()
+
+    # Close database connections
+    try:
+        await db_manager.close()
+        logger.info("database_closed")
+    except Exception as e:
+        logger.error("database_close_failed", error=str(e))
 
 
 # Create FastAPI application
@@ -63,6 +81,12 @@ app.add_middleware(TracingMiddleware)
 app.add_middleware(MetricsMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(RequestIDMiddleware)
+
+# Include Admin API router
+app.include_router(admin_router, tags=["admin"])
+
+# Initialize health checker
+health_checker = HealthChecker()
 
 
 async def get_current_user(
@@ -102,27 +126,35 @@ async def get_current_user(
     return None
 
 
+@app.get("/health/live")
+async def liveness_check():
+    """
+    Kubernetes liveness probe endpoint.
+    Returns 200 if the application is running.
+    """
+    result = await health_checker.check_liveness()
+    return JSONResponse(content=result, status_code=200)
+
+
+@app.get("/health/ready")
+async def readiness_check():
+    """
+    Kubernetes readiness probe endpoint.
+    Returns 200 if the application is ready to serve traffic.
+    """
+    result = await health_checker.check_readiness()
+    status_code = 200 if result["status"] == "ready" else 503
+    return JSONResponse(content=result, status_code=status_code)
+
+
 @app.get("/api/health")
-async def health_check() -> HealthCheck:
-    """Health check endpoint."""
-    from datetime import datetime
-
-    # Check service health
-    services = {}
-
-    for service_name, service_config in router.get_all_services().items():
-        try:
-            # Could ping each service here
-            services[service_name] = "healthy"
-        except Exception:
-            services[service_name] = "unhealthy"
-
-    return HealthCheck(
-        status="healthy",
-        version=settings.app_version,
-        timestamp=datetime.utcnow(),
-        services=services,
-    )
+async def health_check():
+    """
+    Comprehensive health check endpoint with dependency status.
+    """
+    result = await health_checker.check_dependencies()
+    status_code = 200 if result["status"] == "healthy" else 503
+    return JSONResponse(content=result, status_code=status_code)
 
 
 @app.get("/api/metrics")
@@ -245,6 +277,9 @@ async def gateway_proxy(
     start_time = time.time()
 
     try:
+        # Get request ID for propagation to downstream services
+        request_id = getattr(request.state, "request_id", None)
+
         async def proxy_request():
             return await http_proxy.forward_request(
                 upstream_url=upstream_url,
@@ -252,6 +287,7 @@ async def gateway_proxy(
                 headers=dict(request.headers),
                 body=body if body else None,
                 query_params=dict(request.query_params),
+                request_id=request_id,
             )
 
         response = await breaker.call(proxy_request)

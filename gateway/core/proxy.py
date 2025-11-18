@@ -44,6 +44,7 @@ class HTTPProxy:
         headers: Optional[Dict[str, str]] = None,
         body: Optional[bytes] = None,
         query_params: Optional[Dict[str, Any]] = None,
+        request_id: Optional[str] = None,
     ) -> Response:
         """
         Forward a request to an upstream service.
@@ -54,6 +55,7 @@ class HTTPProxy:
             headers: Request headers
             body: Request body
             query_params: Query parameters
+            request_id: Request ID for tracing/correlation
 
         Returns:
             FastAPI Response object
@@ -64,8 +66,8 @@ class HTTPProxy:
         """
         client = await self.get_client()
 
-        # Prepare headers (remove hop-by-hop headers)
-        forwarded_headers = self._prepare_headers(headers or {})
+        # Prepare headers (remove hop-by-hop headers and add request ID)
+        forwarded_headers = self._prepare_headers(headers or {}, request_id=request_id)
 
         try:
             # Make the request to upstream
@@ -102,6 +104,7 @@ class HTTPProxy:
         headers: Optional[Dict[str, str]] = None,
         body: Optional[bytes] = None,
         query_params: Optional[Dict[str, Any]] = None,
+        request_id: Optional[str] = None,
     ) -> StreamingResponse:
         """
         Stream a request to an upstream service (for large responses).
@@ -112,12 +115,13 @@ class HTTPProxy:
             headers: Request headers
             body: Request body
             query_params: Query parameters
+            request_id: Request ID for tracing/correlation
 
         Returns:
             StreamingResponse for streaming content
         """
         client = await self.get_client()
-        forwarded_headers = self._prepare_headers(headers or {})
+        forwarded_headers = self._prepare_headers(headers or {}, request_id=request_id)
 
         try:
             async with client.stream(
@@ -147,10 +151,14 @@ class HTTPProxy:
         except Exception as e:
             raise UpstreamError(f"Unexpected error during streaming: {str(e)}")
 
-    def _prepare_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
+    def _prepare_headers(self, headers: Dict[str, str], request_id: Optional[str] = None) -> Dict[str, str]:
         """
         Prepare headers for forwarding.
-        Remove hop-by-hop headers and add necessary headers.
+        Remove hop-by-hop headers and add necessary headers including request ID.
+
+        Args:
+            headers: Original request headers
+            request_id: Request ID for distributed tracing
         """
         # Hop-by-hop headers that should not be forwarded
         hop_by_hop = {
@@ -169,6 +177,10 @@ class HTTPProxy:
 
         forwarded['x-forwarded-proto'] = 'http'  # Could be https in production
         forwarded['x-gateway'] = settings.app_name
+
+        # Propagate request ID for distributed tracing
+        if request_id:
+            forwarded['X-Request-ID'] = request_id
 
         return forwarded
 
