@@ -74,6 +74,29 @@ class Settings(BaseSettings):
     health_check_enabled: bool = True
     health_check_interval_seconds: int = 30
 
+    # Database (PostgreSQL)
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "api_gateway"
+    db_user: str = "gateway_user"
+    db_password: str = "gateway_password"
+    db_pool_size: int = 20
+    db_max_overflow: int = 40
+    db_pool_timeout: int = 30
+    db_pool_recycle: int = 3600
+
+    # Vault (Secrets Management)
+    vault_enabled: bool = False
+    vault_url: str = "http://localhost:8200"
+    vault_token: Optional[str] = None
+    vault_mount_point: str = "secret"
+
+    # Consul (Service Discovery)
+    consul_enabled: bool = False
+    consul_host: str = "localhost"
+    consul_port: int = 8500
+    consul_datacenter: str = "dc1"
+
 
 # Global settings instance
 settings = Settings()
