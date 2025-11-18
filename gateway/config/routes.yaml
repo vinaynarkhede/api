@@ -1,0 +1,124 @@
+# API Gateway Route Configuration
+
+routes:
+  # User Service Routes
+  - path: "/api/users"
+    methods: ["GET", "POST"]
+    service: "user-service"
+    upstream: "http://user-service:8001"
+    auth_required: true
+    rate_limit:
+      requests: 100
+      window: 60
+    cache:
+      enabled: true
+      ttl: 300
+    strip_path: false
+
+  - path: "/api/users/{user_id}"
+    methods: ["GET", "PUT", "DELETE"]
+    service: "user-service"
+    upstream: "http://user-service:8001"
+    auth_required: true
+    rate_limit:
+      requests: 50
+      window: 60
+    cache:
+      enabled: false
+
+  # Product Service Routes
+  - path: "/api/products"
+    methods: ["GET", "POST"]
+    service: "product-service"
+    upstream: "http://product-service:8002"
+    auth_required: false
+    rate_limit:
+      requests: 200
+      window: 60
+    cache:
+      enabled: true
+      ttl: 600
+
+  - path: "/api/products/{product_id}"
+    methods: ["GET", "PUT", "DELETE"]
+    service: "product-service"
+    upstream: "http://product-service:8002"
+    auth_required: true
+    rate_limit:
+      requests: 100
+      window: 60
+    cache:
+      enabled: true
+      ttl: 300
+
+  # Order Service Routes
+  - path: "/api/orders"
+    methods: ["GET", "POST"]
+    service: "order-service"
+    upstream: "http://order-service:8003"
+    auth_required: true
+    rate_limit:
+      requests: 50
+      window: 60
+    cache:
+      enabled: false
+
+  - path: "/api/orders/{order_id}"
+    methods: ["GET", "PUT", "DELETE"]
+    service: "order-service"
+    upstream: "http://order-service:8003"
+    auth_required: true
+    rate_limit:
+      requests: 50
+      window: 60
+    cache:
+      enabled: false
+
+  # Public Routes (No auth required)
+  - path: "/api/health"
+    methods: ["GET"]
+    service: "gateway"
+    upstream: "internal"
+    auth_required: false
+    rate_limit:
+      requests: 1000
+      window: 60
+
+  - path: "/api/auth/login"
+    methods: ["POST"]
+    service: "user-service"
+    upstream: "http://user-service:8001"
+    auth_required: false
+    rate_limit:
+      requests: 10
+      window: 60
+
+  - path: "/api/auth/register"
+    methods: ["POST"]
+    service: "user-service"
+    upstream: "http://user-service:8001"
+    auth_required: false
+    rate_limit:
+      requests: 5
+      window: 60
+
+# Service Discovery Configuration
+services:
+  user-service:
+    url: "http://user-service:8001"
+    health_check: "/health"
+    timeout: 30
+
+  product-service:
+    url: "http://product-service:8002"
+    health_check: "/health"
+    timeout: 30
+
+  order-service:
+    url: "http://order-service:8003"
+    health_check: "/health"
+    timeout: 30
+
+# Load Balancing (for multiple instances)
+load_balancing:
+  strategy: "round_robin"  # round_robin, least_connections, random, weighted

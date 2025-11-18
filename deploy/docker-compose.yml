@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: api-gateway-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - api-network
+
+  # API Gateway
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.gateway
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=true
+      - ENVIRONMENT=development
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SECRET_KEY=your-secret-key-change-in-production
+      - LOG_LEVEL=INFO
+      - RATE_LIMIT_ENABLED=true
+      - CACHE_ENABLED=true
+      - CIRCUIT_BREAKER_ENABLED=true
+      - METRICS_ENABLED=true
+      - TRACING_ENABLED=true
+    depends_on:
+      redis:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+    volumes:
+      - ../gateway:/app/gateway
+      - ../shared:/app/shared
+    networks:
+      - api-network
+    restart: unless-stopped
+
+  # User Service
+  user-service:
+    build:
+      context: ../services/user-service
+      dockerfile: ../../deploy/docker/Dockerfile.service
+    container_name: user-service
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_NAME=user-service
+      - PORT=8001
+    volumes:
+      - ../services/user-service:/app
+    networks:
+      - api-network
+    restart: unless-stopped
+
+  # Product Service
+  product-service:
+    build:
+      context: ../services/product-service
+      dockerfile: ../../deploy/docker/Dockerfile.service
+    container_name: product-service
+    ports:
+      - "8002:8002"
+    environment:
+      - SERVICE_NAME=product-service
+      - PORT=8002
+    volumes:
+      - ../services/product-service:/app
+    networks:
+      - api-network
+    restart: unless-stopped
+
+  # Order Service
+  order-service:
+    build:
+      context: ../services/order-service
+      dockerfile: ../../deploy/docker/Dockerfile.service
+    container_name: order-service
+    ports:
+      - "8003:8003"
+    environment:
+      - SERVICE_NAME=order-service
+      - PORT=8003
+    volumes:
+      - ../services/order-service:/app
+    networks:
+      - api-network
+    restart: unless-stopped
+
+  # Prometheus (Optional - for metrics)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: api-gateway-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - api-network
+    restart: unless-stopped
+
+  # Grafana (Optional - for visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: api-gateway-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - api-network
+    restart: unless-stopped
+
+networks:
+  api-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  prometheus_data:
+  grafana_data:
